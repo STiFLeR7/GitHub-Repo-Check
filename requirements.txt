@@ -1,3 +1,4 @@
+utils
 streamlit
 requests
 pandas>=2.2.3
