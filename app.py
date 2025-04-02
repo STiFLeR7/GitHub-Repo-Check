@@ -1,167 +1,207 @@
 import streamlit as st
 from streamlit import session_state as sst
-import pandas as pd
-from datetime import datetime
-from utils.process_github_data import *
-import matplotlib.pyplot as plt
-import plotly.graph_objects as go
-from utils.util import load_css, format_date_ddmmyyyy
-from utils.fetch_github_data import *
-from utils.streamlit_ui import base_ui, growth_stats
+from utils.fetch_github_data import fetch_star_count
+from dotenv import load_dotenv
 import os
+load_dotenv()
+TOKEN = os.getenv("token")
 
-color = "#26a641"
 
-def main():
-    base_ui()  # Base UI containing title, star button, and sidebar form
+def base_ui():
+    """
+    ### Sets up the base user interface for the Streamlit application.
 
-    ## Fetch username and token from Streamlit secrets
-    sst.username = st.secrets["github"]["username"]  # Fetch GitHub username from Streamlit secrets
-    TOKEN = st.secrets["github"]["token"]  # Fetch GitHub token from Streamlit secrets
+    This function performs the following tasks:
+    1. Configures the Streamlit page settings.
+    2. Initializes the Streamlit session state.
+    3. Displays the title bar and input fields.
+    4. Creates a sidebar with a form.
+    """
 
-    if sst.username and TOKEN and sst.button_pressed:
-        # Fetch data
-        cont_data = fetch_contribution_data(sst.username, TOKEN)
-        user_data = fetch_user_data(sst.username, TOKEN)
-        repo_data = fetch_repo_data(sst.username, TOKEN)
+    # Streamlit Page Config
+    page_config()
 
-        if "errors" in cont_data or "errors" in user_data or "errors" in repo_data:
-            st.error("Error fetching data. Check your username/token.")
-        else:
-            # Process data
-            cont_stats = process_contribution_data(cont_data)
-            user_stats = process_user_data(user_data)
+    # Initialise streamlit session state
+    initialize_sst()
 
-            # --- User Stats Summary ---
-            st.markdown("### User Summary")
-            with st.container():
-                user_info, user_stats_info = st.columns([1, 3], border=True, vertical_alignment="center")
-                with user_info:
-                    avatar_url = user_stats.get("avatar_url")
-                    user_bio = user_stats.get("bio")
-                    location = user_stats.get("location")
-                    followers = user_stats.get("followers")
-                    following = user_stats.get("following")
-                    repositories = user_stats.get("repositories")
-                    total_prs = user_stats.get("total_pullrequests")
-                    total_issues = user_stats.get("total_issues")
-                    created_at = datetime.strptime(user_stats.get("created_at"), "%Y-%m-%dT%H:%M:%SZ")
-                    created_at = created_at.strftime("%Y-%m-%d")
+    # Title and input
+    title_bar()
 
-                    custom_css = load_css()
-                    st.markdown(f"""
-                                <style>
-                                {custom_css}
-                                </style>
-                                """, unsafe_allow_html=True)
+    with st.sidebar:
+        form() # Streamlit Form
 
-                    st.markdown(f"""
-                                <div class="user-container">
-                                    <div class="user-card">
-                                        <img src="{avatar_url}" alt="Avatar" class="avatar">
-                                        <div class="username">{sst.username}</div>
-                                        <div class="bio">{user_bio}</div>
-                                        <div class="stats">
-                                            <div class="stat">Location:<b> {location}</b></div>
-                                            <div class="stat">Repos:<b> {repositories}</b></div>
-                                            <div class="stat">Followers:<b> {followers}</b></div>
-                                            <div class="stat">Following:<b> {following}</b></div>
-                                            <div class="stat">PRs:<b> {total_prs}</b></div>
-                                            <div class="stat">Issues:<b> {total_issues}</b></div>
-                                        </div>
-                                    </div>
-                                </div>
-                            """, unsafe_allow_html=True)
+        if sst.username and sst.token and sst.button_pressed:
+            nav_ui() # Sidebar navigation menu
 
-                with user_stats_info:
-                    # --- Summary Stats ---
-                    total_contributions = cont_stats.get("total_contributions", 0)
-                    public_contributions = cont_stats.get("public_contributions", 0)
-                    private_contributions = cont_stats.get("private_contributions", 0)
-                    highest_contribution = cont_stats.get("highest_contribution", 0)
-                    highest_contribution_date = cont_stats.get("highest_contribution_date", None)
-                    today_commits = cont_stats.get("today_commits", 0)
-                    current_streak = cont_stats.get("current_streak", 0)
-                    longest_streak = cont_stats.get("longest_streak", 0)
-                    days = cont_stats.get("days", [])
+        # how_to_use()
+        promo()
 
-                    # Validate contribution data
-                    if public_contributions == 0 and private_contributions == 0:
-                        st.warning("No contributions found. If you have private repositories, make sure your token has the 'repo' scope.")
 
-                    # Calculate contributions based on toggle
-                    display_total = public_contributions + private_contributions
-                    if private_contributions == 0:
-                        st.info("No private contributions found. If you have private repositories, verify your token permissions.")
+def page_config():
+    """
+    ### Configures the Streamlit page settings.
 
-                    # Display summary metrics
-                    if today_commits > 0:
-                        st.markdown(f"#### 🔥 Today: {today_commits} commits")
-                    col1, col2, col3 = st.columns(3, border=True)
-                    col1.metric(
-                        "Total Contributions", 
-                        value=f"{display_total:,} commits",
-                        delta=f"Public: {public_contributions:,} | Private: {private_contributions:,}",
-                        delta_color="off" if display_total == 0 else "normal"
-                    )
-                    col2.metric(
-                        "Current Streak", 
-                        value=f"{'☹️' if current_streak == 0 else '🔥'} {current_streak} days",
-                        delta=f"Longest: {longest_streak} days",
-                        delta_color="off" if current_streak == 0 else "normal"
-                    )
-                    col3.metric(
-                        "Most Productive Day",
-                        value=f"{highest_contribution} commits",
-                        delta=f"{highest_contribution_date if highest_contribution > 0 else 'No activity found'}",
-                        delta_color="normal"
-                    )
+    This function sets the page title, icon, layout, and menu items for the Streamlit app.
+    The app is designed to track GitHub contributions and provide insights into user activity.
 
-                    # Days on GitHub & Active days
-                    formatted_date = user_stats.get("formatted_date")
-                    joined_since = user_stats.get("joined_since")
-                    github_days = user_stats.get("github_days")
-                    active_days = cont_stats.get("active_days")
-                    less_than_2_months_old = user_stats.get("less_than_2_months_old")
+    Menu Items:
+        - About: Provides information about the app and its developers.
+        - Report a bug: Link to the GitHub issues page for reporting bugs.
+    """
 
-                    col1, col2 = st.columns(2, border=True)
-                    col1.metric(
-                        label="Joined Github since",
-                        value=formatted_date,
-                        delta=joined_since,
-                        delta_color="inverse" if less_than_2_months_old else "normal"
-                    )
+    st.set_page_config(
+        page_title = "GitHub Stats",
+        page_icon = "./static/icon.png",
+        layout = "wide",
+        menu_items={
+            "About": """
+            This is a Streamlit app that tracks your GitHub contributions and provides insights into your activity.  
+            Built by [:red[TheCarBun]](https://github.com/TheCarBun/) & [:red[Pakagronglb]](https://github.com/pakagronglb)  
+            GitHub: [:green[GitHub-Stats]](https://github.com/TheCarBun/GitHub-Stat-Checker)
+            """,
+            
+            "Report a bug": "https://github.com/TheCarBun/GitHub-Stat-Checker/issues",
+        }
+    )
 
-                    col2.metric(
-                        label="Total days on GitHub",
-                        value=f"{github_days} days",
-                        delta=f"Active for: {active_days} days",
-                        delta_color="off" if active_days < 7 else "normal"
-                    )
+def initialize_sst():
+    """
+    ### Initialize the session state with default values if they are not already set.
+    This function checks if certain keys are present in the session state (sst).
 
-            # Prepare data for visualizations
-            if not days:
-                st.warning("No contribution data available for visualizations.")
-            else:
-                dates = [datetime.strptime(day["date"], "%Y-%m-%d") for day in days]
-                contributions = [day.get("contributionCount", 0) for day in days]
+    If any of these keys are missing, it initializes them with default values:
+    - 'username': an empty string
+    - 'user_token': an empty string
+    - 'token_present': False
+    - 'button_pressed': False
+    """
 
-                # --- Contributions Over Time ---
-                st.markdown("### Contributions Over Time")
-                chart_data = pd.DataFrame({"Date": dates, "Contributions": contributions})
-                st.line_chart(chart_data.set_index("Date"))
+    # Initializing session state
+    if 'username' not in sst:
+        sst.username = ''
+    if 'user_token' not in sst:
+        sst.user_token = ''
+    if 'token_present' not in sst:
+        sst.token_present = False
+    if 'button_pressed' not in sst:
+        sst.button_pressed = False
 
-                # --- Yearly Growth ---
-                st.markdown("### Yearly Growth")
-                chart_data['Year'] = chart_data['Date'].dt.year
-                yearly_contributions = chart_data.groupby('Year')['Contributions'].sum().round(1)
-                st.bar_chart(yearly_contributions, color=color)
+def title_bar():
+    """
+    ### Creates a title bar for the Streamlit UI with the title "GitHub Stats" and a star button.
 
-                # --- Weekday vs. Weekend Contributions ---
-                st.markdown("### Weekday vs. Weekend Contributions")
-                chart_data['IsWeekend'] = chart_data['Date'].dt.dayofweek >= 5
-                weekend_data = chart_data.groupby('IsWeekend')['Contributions'].sum()
-                st.bar_chart(weekend_data, color=color)
+    The title bar consists of two columns:
+    - The first column displays the title "GitHub Stats".
+    - The second column displays a button with the current star count of the GitHub repository.
 
-if __name__ == "__main__":
-    main()
+    The star button links to the GitHub repository and encourages users to give a star to the repository.
+    """
+
+    title_col, star_col = st.columns([8.5,1.5], vertical_alignment="bottom")
+    title_col.title("GitHub Stats")
+    stars = fetch_star_count()
+    star_col.link_button(f"⭐ Star :orange[(**{stars}**)]", 
+                        "https://github.com/TheCarBun/GitHub-Stat-Checker", 
+                        help=f"Give a star to this repository on GitHub. Current stars: {stars}",
+                        use_container_width=True)
+
+def form():
+    """
+    ### Creates a form in a Streamlit container for GitHub username and optional personal access token input.
+
+    The form includes:
+    - A text input for the GitHub username.
+    - A toggle to indicate if the user has a GitHub Access Token.
+    - A conditional text input for the GitHub Personal Access Token if the toggle is enabled.
+    - A button to trigger the analysis.
+
+    Updates the global state variables `sst.username`, `sst.token_present`, `sst.user_token`, `sst.token`, and `sst.button_pressed` based on user input.
+    """
+
+    form = st.container(border=True)
+    sst.username = form.text_input("Enter GitHub Username:", value=sst.username)
+    
+    if form.toggle("I have a GitHub Access Token", value=sst.token_present, help="Toggle if you have a token. Create [Personal Access Token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-personal-access-token-classic)"):
+        sst.token_present = True
+    else:
+        sst.token_present = False
+    
+    # Add warning about token permissions if showing private contributions
+    if sst.token_present:
+        sst.user_token = form.text_input("Enter GitHub Personal Access Token:", value=sst.user_token, type="password")
+        sst.token = sst.user_token
+    else:
+        sst.token = TOKEN
+    
+    if form.button("Analyze", type="primary"):
+        sst.button_pressed = True
+
+def how_to_use():
+    """
+    ### Displays an expander with instructions on how to use the GitHub stats checker tool.
+
+    The expander contains a brief guide on:
+    - Entering the GitHub username.
+    - Viewing stats and predictions.
+    - Exporting the data for further analysis.
+    """
+
+    with st.expander("❓ How to Use This Tool"):
+        st.write("""
+        This tool analyzes your GitHub activity and predicts future contributions.
+        - Enter your GitHub username.
+        - View your stats and predictions.
+        - Export the data for further analysis.
+        """)
+
+
+def nav_ui():
+    """
+    ### Creates the navigation sidebar UI for the GitHub stats checker application.
+    This function adds navigation links to the sidebar using Streamlit's `st.page_link` method.
+    The sidebar contains links to the "Overview" and "Predictions" pages, each with an icon and a help tooltip.
+    
+    **Sidebar Links:**
+    - Overview: Links to "app.py" with a star icon and a tooltip for checking GitHub stats and contributions.
+    - Predictions: Links to "./pages/predictions.py" with a lightning bolt icon and a tooltip for predicting GitHub contributions.
+    """
+
+    with st.sidebar.container(border=True):
+        col1, col2 = st.columns(2)
+        col1.page_link(
+            "app.py", 
+            label="Overview", 
+            icon="✨",
+            help="ℹ️ Check your GitHub stats and contributions.",
+            use_container_width=True
+            )
+        col2.page_link(
+            "./pages/predictions.py", 
+            label="Predictions", 
+            icon="⚡",
+            help="ℹ️ Predict your GitHub contributions.",
+            use_container_width=True
+            )
+
+def promo():
+    with open("static/sidebar.html", "r", encoding="UTF-8") as sidebar_file:
+        sidebar_html = sidebar_file.read()
+    st.html(sidebar_html)
+
+def growth_stats(total_contributions:int, contribution_rate:int, active_days:int, total_days:int, percent_active_days:float, since:str):
+    col1, col2 = st.columns(2)
+    col1.metric(
+        label=f"Total Contributions {since}", 
+        value=f"{total_contributions} commits",
+        delta=f"{contribution_rate:.2f} contributions/day",
+        delta_color="inverse" if contribution_rate < 1 else "normal",
+        border=True
+        )
+    
+    col2.metric(
+        label="Active Days", 
+        value=f"{active_days}/{total_days} days",
+        delta=f"{percent_active_days:.1f}% days active",
+        delta_color="inverse" if percent_active_days < 8 else "normal",
+        border=True
+        )
