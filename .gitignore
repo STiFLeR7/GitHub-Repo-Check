@@ -3,3 +3,4 @@ __pycache__
 test.py 
 data.json
 .streamlit/secrets.toml
+.env
